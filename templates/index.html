@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Synthetic RVTools export</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hero">
+        <h1>Synthetic RVTools <span class="muted">.xlsx</span></h1>
+        <p class="lead">
+          Builds a workbook from the template <code>customer.xlsx</code>: rows are filtered to match the chosen
+          environment size, then VMs, hosts, clusters and datacenters are renamed to neutral placeholders.
+          <strong>XXL</strong> keeps every template VM and adds synthetic clones so the total VM count is about
+          <strong>140%</strong> of the original (40% extra VMs).
+        </p>
+      </header>
+
+      <form id="form" class="card">
+        <fieldset>
+          <legend>Environment size</legend>
+          <div class="sizes">
+            <label><input type="radio" name="size" value="s" /> S · ~120 VMs</label>
+            <label><input type="radio" name="size" value="m" checked /> M · ~400 VMs</label>
+            <label><input type="radio" name="size" value="l" /> L · ~1000 VMs</label>
+            <label><input type="radio" name="size" value="xl" /> XL · all template VMs</label>
+            <label><input type="radio" name="size" value="xxl" /> XXL · all VMs + 40% synthetic clones</label>
+          </div>
+        </fieldset>
+
+        <label class="field">
+          <span>Output filename</span>
+          <input type="text" id="filename" value="rvtools_synthetic.xlsx" autocomplete="off" />
+        </label>
+
+        <div class="field">
+          <span>Export folder (browser)</span>
+          <div class="row">
+            <button type="button" id="pickDir" class="btn secondary">Choose folder…</button>
+            <span id="dirLabel" class="hint">No folder selected → file downloads normally</span>
+          </div>
+          <p class="hint small">
+            “Choose folder” uses the File System Access API (Chromium). Without a folder, the browser starts a
+            standard download.
+          </p>
+        </div>
+
+        <div class="field server-path">
+          <span>Server path (optional, local Flask only)</span>
+          <input type="text" id="serverDir" placeholder="/Users/me/exports" autocomplete="off" />
+          <p class="hint small">
+            If set, the Flask server writes the file directly to this directory (trusted local use only).
+          </p>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn primary" id="submitBtn">Generate &amp; save</button>
+        </div>
+
+        <p id="status" class="status" role="status"></p>
+      </form>
+    </main>
+    <script>
+      (function () {
+        const form = document.getElementById("form");
+        const pickDir = document.getElementById("pickDir");
+        const dirLabel = document.getElementById("dirLabel");
+        const filenameInput = document.getElementById("filename");
+        const serverDir = document.getElementById("serverDir");
+        const status = document.getElementById("status");
+        const submitBtn = document.getElementById("submitBtn");
+
+        let dirHandle = null;
+
+        function setStatus(msg, kind) {
+          status.textContent = msg || "";
+          status.dataset.kind = kind || "";
+        }
+
+        pickDir.addEventListener("click", async () => {
+          if (!window.showDirectoryPicker) {
+            setStatus(
+              "This browser does not support folder pickers. Use a normal download or try Chromium.",
+              "warn"
+            );
+            return;
+          }
+          try {
+            dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+            dirLabel.textContent = "Folder selected (writable)";
+            setStatus("", "");
+          } catch (e) {
+            if (e && e.name === "AbortError") return;
+            setStatus("Could not open folder: " + (e && e.message ? e.message : e), "err");
+          }
+        });
+
+        form.addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          const size = (form.querySelector('input[name="size"]:checked') || {}).value || "m";
+          let filename = (filenameInput.value || "rvtools_synthetic.xlsx").trim();
+          if (!filename.toLowerCase().endsWith(".xlsx")) filename += ".xlsx";
+
+          const serverPath = (serverDir.value || "").trim();
+          submitBtn.disabled = true;
+          setStatus("Generating…", "info");
+
+          try {
+            if (serverPath) {
+              const res = await fetch("/api/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ size, filename, export_dir: serverPath }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(data.error || res.statusText);
+              setStatus("Saved to: " + (data.written_path || ""), "ok");
+              return;
+            }
+
+            const res = await fetch("/api/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ size, filename }),
+            });
+
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              throw new Error(data.error || res.statusText);
+            }
+
+            const blob = await res.blob();
+
+            if (dirHandle && dirHandle.getFileHandle) {
+              const fh = await dirHandle.getFileHandle(filename, { create: true });
+              const w = await fh.createWritable();
+              await w.write(blob);
+              await w.close();
+              setStatus("Saved in the selected folder: " + filename, "ok");
+            } else {
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+              setStatus("Download started.", "ok");
+            }
+          } catch (e) {
+            setStatus(e.message || String(e), "err");
+          } finally {
+            submitBtn.disabled = false;
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
