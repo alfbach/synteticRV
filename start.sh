@@ -1,21 +1,13 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -e
+cd "$(dirname "$0")"
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$ROOT"
-
-VENV="${VENV:-$ROOT/.venv}"
-PY="${PY:-python3}"
-
-if [[ ! -d "$VENV" ]]; then
-  echo "Creating virtual environment: $VENV"
-  "$PY" -m venv "$VENV"
+if [ ! -d ".venv" ]; then
+  python3 -m venv .venv
+  .venv/bin/pip install -r requirements.txt
 fi
 
-# shellcheck source=/dev/null
-source "$VENV/bin/activate"
-
-python -m pip install -q -r "$ROOT/requirements.txt"
-
-echo "Starting synteticRV at http://127.0.0.1:8765 (Ctrl+C to stop)"
-exec python "$ROOT/app.py"
+source .venv/bin/activate
+PORT="${PORT:-8080}"
+echo "RVtools Filter App: http://localhost:${PORT}"
+exec python -c "from app import app; app.run(debug=True, host='0.0.0.0', port=${PORT})"
