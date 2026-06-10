@@ -1,162 +1,789 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Synthetic RVTools export</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
-  </head>
-  <body>
-    <main class="wrap">
-      <header class="hero">
-        <h1>Synthetic RVTools <span class="muted">.xlsx</span></h1>
-        <p class="lead">
-          Builds a workbook from the template <code>customer.xlsx</code>: rows are filtered to match the chosen
-          environment size, then VMs, hosts, clusters and datacenters are renamed to neutral placeholders.
-          <strong>XXL</strong> keeps every template VM and adds synthetic clones so the total VM count is about
-          <strong>140%</strong> of the original (40% extra VMs).
-        </p>
-      </header>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RVtools Cluster Filter</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-inner">
+        <div>
+          <h1>RVtools Cluster Filter</h1>
+          <p class="subtitle">Upload RVtools export, select clusters, edit and export</p>
+        </div>
+        <div class="steps" id="steps">
+          <span class="step active" data-step="1">1. Upload</span>
+          <span class="step" data-step="2">2. Clusters</span>
+          <span class="step" data-step="3">3. Edit</span>
+          <span class="step" data-step="4">4. Export</span>
+          <span class="step" data-step="5">5. Analytics</span>
+          <span class="step" data-step="6">6. Customer</span>
+        </div>
+      </div>
+    </header>
 
-      <form id="form" class="card">
-        <fieldset>
-          <legend>Environment size</legend>
-          <div class="sizes">
-            <label><input type="radio" name="size" value="s" /> S · ~120 VMs</label>
-            <label><input type="radio" name="size" value="m" checked /> M · ~400 VMs</label>
-            <label><input type="radio" name="size" value="l" /> L · ~1000 VMs</label>
-            <label><input type="radio" name="size" value="xl" /> XL · all template VMs</label>
-            <label><input type="radio" name="size" value="xxl" /> XXL · all VMs + 40% synthetic clones</label>
+    <main class="main">
+      <!-- Step 1: Upload -->
+      <section class="panel active" id="panel-upload">
+        <div class="upload-zone" id="upload-zone">
+          <input type="file" id="file-input" accept=".xlsx,.xls" hidden>
+          <div class="upload-icon">📊</div>
+          <h2>Upload RVtools.xlsx</h2>
+          <p>Drop file here or click to browse</p>
+          <button type="button" class="btn btn-primary" id="browse-btn">Choose file</button>
+        </div>
+        <div class="loading hidden" id="upload-loading">
+          <div class="spinner"></div>
+          <p>Analyzing file…</p>
+        </div>
+      </section>
+
+      <!-- Step 2: Cluster selection -->
+      <section class="panel" id="panel-clusters">
+        <div class="panel-header">
+          <div>
+            <h2>Select clusters</h2>
+            <p class="meta" id="file-meta"></p>
           </div>
-        </fieldset>
-
-        <label class="field">
-          <span>Output filename</span>
-          <input type="text" id="filename" value="rvtools_synthetic.xlsx" autocomplete="off" />
-        </label>
-
-        <div class="field">
-          <span>Export folder (browser)</span>
-          <div class="row">
-            <button type="button" id="pickDir" class="btn secondary">Choose folder…</button>
-            <span id="dirLabel" class="hint">No folder selected → file downloads normally</span>
+          <div class="panel-actions">
+            <input type="search" id="cluster-search" placeholder="Search clusters…" class="search-input">
+            <button type="button" class="btn btn-ghost" id="select-all">All</button>
+            <button type="button" class="btn btn-ghost" id="select-none">None</button>
+            <button type="button" class="btn btn-primary" id="apply-clusters">Apply filter</button>
           </div>
-          <p class="hint small">
-            “Choose folder” uses the File System Access API (Chromium). Without a folder, the browser starts a
-            standard download.
-          </p>
         </div>
 
-        <div class="field server-path">
-          <span>Server path (optional, local Flask only)</span>
-          <input type="text" id="serverDir" placeholder="/Users/me/exports" autocomplete="off" />
-          <p class="hint small">
-            If set, the Flask server writes the file directly to this directory (trusted local use only).
-          </p>
+        <div class="stats-bar" id="stats-bar"></div>
+
+        <div class="cluster-grid" id="cluster-grid"></div>
+
+        <div class="panel-footer">
+          <button type="button" class="btn btn-ghost" id="back-upload">Back</button>
+          <button type="button" class="btn btn-primary" id="to-edit" disabled>Continue to edit</button>
+        </div>
+      </section>
+
+      <!-- Step 3: Edit -->
+      <section class="panel" id="panel-edit">
+        <div class="panel-header">
+          <div>
+            <h2>Edit data</h2>
+            <p class="meta">Click cells to edit — optional before export</p>
+          </div>
+          <div class="panel-actions">
+            <select id="sheet-select" class="select-input"></select>
+            <input type="search" id="table-search" placeholder="Search table…" class="search-input">
+          </div>
         </div>
 
-        <div class="actions">
-          <button type="submit" class="btn primary" id="submitBtn">Generate &amp; save</button>
+        <div class="table-wrap">
+          <table class="data-table" id="data-table">
+            <thead id="table-head"></thead>
+            <tbody id="table-body"></tbody>
+          </table>
         </div>
 
-        <p id="status" class="status" role="status"></p>
-      </form>
+        <div class="pagination" id="pagination">
+          <button type="button" class="btn btn-ghost" id="prev-page" disabled>← Back</button>
+          <span id="page-info">Page 1</span>
+          <button type="button" class="btn btn-ghost" id="next-page">Next →</button>
+        </div>
+
+        <div class="panel-footer">
+          <button type="button" class="btn btn-ghost" id="back-clusters">Back to clusters</button>
+          <button type="button" class="btn btn-primary" id="to-export">Continue to export</button>
+        </div>
+      </section>
+
+      <!-- Step 4: Export -->
+      <section class="panel" id="panel-export">
+        <div class="export-card">
+          <div class="export-icon">✅</div>
+          <h2>Ready to export</h2>
+          <p id="export-summary"></p>
+          <div class="export-actions">
+            <a class="btn btn-primary btn-lg" id="download-btn" href="#">Download RVtools.xlsx</a>
+          </div>
+          <button type="button" class="btn btn-ghost" id="to-analytics">View VM analytics</button>
+          <button type="button" class="btn btn-ghost" id="to-customer">Create customer description</button>
+          <button type="button" class="btn btn-ghost" id="new-session">Upload new file</button>
+        </div>
+      </section>
+
+      <!-- Step 5: VM Analytics -->
+      <section class="panel" id="panel-analytics">
+        <div class="panel-header">
+          <div>
+            <h2>VM analytics</h2>
+            <p class="meta" id="analytics-meta">Operating systems and running applications per VM</p>
+          </div>
+          <div class="panel-actions">
+            <input type="search" id="app-search" placeholder="Search applications…" class="search-input">
+          </div>
+        </div>
+
+        <div class="analytics-stats" id="analytics-stats"></div>
+
+        <div class="analytics-grid">
+          <div class="analytics-card">
+            <h3>Operating systems</h3>
+            <p class="card-subtitle">Number of powered-on VMs per OS</p>
+            <div class="os-family-bar" id="os-family-bar"></div>
+            <div class="table-wrap analytics-table-wrap">
+              <table class="data-table" id="os-table">
+                <thead>
+                  <tr><th>Operating system</th><th>VMs</th><th>Share</th></tr>
+                </thead>
+                <tbody id="os-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="analytics-card">
+            <h3>Discovered applications</h3>
+            <p class="card-subtitle">Powered-on VMs (DNS name or VM name)</p>
+            <ul id="app-name-list" class="preview-list app-name-list"></ul>
+            <p class="preview-more hidden" id="app-names-more"></p>
+          </div>
+        </div>
+
+        <div class="analytics-card analytics-vm-card">
+          <h3>VM details</h3>
+          <p class="card-subtitle">Application, operating system and cluster per VM</p>
+          <div class="table-wrap analytics-table-wrap">
+            <table class="data-table" id="vm-detail-table">
+              <thead>
+                <tr><th>Application / VM</th><th>Operating system</th><th>Cluster</th><th>Host</th></tr>
+              </thead>
+              <tbody id="vm-detail-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button type="button" class="btn btn-ghost" id="back-export-from-analytics">Back to export</button>
+          <button type="button" class="btn btn-primary" id="analytics-to-customer">Continue to customer description</button>
+        </div>
+      </section>
+
+      <!-- Step 6: Customer description -->
+      <section class="panel" id="panel-customer">
+        <div class="panel-header">
+          <div>
+            <h2>Customer description</h2>
+            <p class="meta" id="customer-meta">Infrastructure data from the current RVtools file</p>
+          </div>
+        </div>
+
+        <div class="customer-layout">
+          <form class="customer-form" id="customer-form">
+            <div class="form-tabs">
+              <button type="button" class="form-tab active" data-tab="master">Master data</button>
+              <button type="button" class="form-tab" data-tab="software">Software</button>
+            </div>
+
+            <div class="form-tab-panel active" id="tab-master">
+              <div class="form-group">
+                <label for="customer-name">Customer name</label>
+                <input type="text" id="customer-name" class="form-input" placeholder="e.g. Acme Corp" required>
+              </div>
+              <div class="form-group">
+                <label for="customer-address">Address</label>
+                <textarea id="customer-address" class="form-input form-textarea" rows="3" placeholder="Street, city, postal code&#10;Country" required></textarea>
+              </div>
+              <div class="form-group">
+                <label for="contact-person">Contact person</label>
+                <input type="text" id="contact-person" class="form-input" placeholder="e.g. John Smith">
+              </div>
+              <div class="form-group">
+                <label for="additional-info">Additional information</label>
+                <textarea id="additional-info" class="form-input form-textarea" rows="4" placeholder="Free text for project notes, special requirements, remarks…"></textarea>
+              </div>
+            </div>
+
+            <div class="form-tab-panel" id="tab-software">
+              <div class="form-group">
+                <label for="software-info">Software infrastructure</label>
+                <textarea id="software-info" class="form-input form-textarea form-textarea-lg" rows="12" placeholder="e.g.&#10;VMware vSphere 8.0&#10;vCenter Server&#10;Veeam Backup &amp; Replication&#10;Microsoft SQL Server&#10;…"></textarea>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="export-doc-btn">Export as Word document</button>
+          </form>
+
+          <div class="customer-preview" id="customer-preview">
+            <h3>Infrastructure preview</h3>
+            <div class="preview-stats" id="preview-stats"></div>
+            <div class="preview-section">
+              <h4>CPU cores per node</h4>
+              <p id="preview-cores-summary" class="preview-summary-text">—</p>
+              <div class="table-wrap preview-table-wrap">
+                <table class="data-table" id="preview-nodes-table">
+                  <thead>
+                    <tr><th>Host</th><th>Cluster</th><th>Cores</th></tr>
+                  </thead>
+                  <tbody id="preview-nodes-body"></tbody>
+                </table>
+              </div>
+              <p class="preview-more hidden" id="preview-nodes-more"></p>
+            </div>
+            <div class="preview-section">
+              <h4>Storage</h4>
+              <p id="preview-storage">—</p>
+            </div>
+            <div class="preview-section">
+              <h4>Operating systems</h4>
+              <ul id="preview-os" class="preview-list"></ul>
+            </div>
+            <div class="preview-section">
+              <h4>Running applications / VMs</h4>
+              <ul id="preview-apps" class="preview-list"></ul>
+              <p class="preview-more hidden" id="preview-apps-more"></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button type="button" class="btn btn-ghost" id="back-analytics">Back to analytics</button>
+        </div>
+      </section>
     </main>
-    <script>
-      (function () {
-        const form = document.getElementById("form");
-        const pickDir = document.getElementById("pickDir");
-        const dirLabel = document.getElementById("dirLabel");
-        const filenameInput = document.getElementById("filename");
-        const serverDir = document.getElementById("serverDir");
-        const status = document.getElementById("status");
-        const submitBtn = document.getElementById("submitBtn");
 
-        let dirHandle = null;
+    <div class="toast hidden" id="toast"></div>
+  </div>
 
-        function setStatus(msg, kind) {
-          status.textContent = msg || "";
-          status.dataset.kind = kind || "";
+  <script>
+    const state = {
+      sessionId: null,
+      filename: null,
+      clusters: [],
+      selectedClusters: new Set(),
+      filtered: false,
+      currentSheet: null,
+      offset: 0,
+      limit: 50,
+      totalRows: 0,
+      columns: [],
+      rows: [],
+      currentStep: 1,
+      analytics: null,
+    };
+
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => document.querySelectorAll(sel);
+
+    function showToast(msg, type = 'info') {
+      const toast = $('#toast');
+      toast.textContent = msg;
+      toast.className = `toast toast-${type}`;
+      setTimeout(() => toast.classList.add('hidden'), 3500);
+    }
+
+    function setStep(step) {
+      state.currentStep = step;
+      $$('.step').forEach((el) => {
+        el.classList.toggle('active', Number(el.dataset.step) <= step);
+        el.classList.toggle('current', Number(el.dataset.step) === step);
+      });
+      $$('.panel').forEach((el) => el.classList.remove('active'));
+      const panels = ['', 'panel-upload', 'panel-clusters', 'panel-edit', 'panel-export', 'panel-analytics', 'panel-customer'];
+      $(`#${panels[step]}`).classList.add('active');
+    }
+
+    const uploadZone = $('#upload-zone');
+    const fileInput = $('#file-input');
+
+    $('#browse-btn').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+    });
+
+    uploadZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('dragover');
+      if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
+    });
+
+    async function uploadFile(file) {
+      if (!file.name.match(/\.xlsx?$/i)) {
+        showToast('Please upload a .xlsx file.', 'error');
+        return;
+      }
+      uploadZone.classList.add('hidden');
+      $('#upload-loading').classList.remove('hidden');
+
+      const form = new FormData();
+      form.append('file', file);
+
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+        state.sessionId = data.session_id;
+        state.filename = data.filename;
+        state.clusters = data.clusters;
+        state.selectedClusters = new Set();
+        state.filtered = false;
+
+        renderClusters();
+        renderStats(data);
+        $('#file-meta').textContent = `${data.filename} — ${data.cluster_count} clusters, ${data.vm_count} VMs, ${data.host_count} hosts`;
+        setStep(2);
+        showToast(`${data.cluster_count} clusters detected`, 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+        uploadZone.classList.remove('hidden');
+      } finally {
+        $('#upload-loading').classList.add('hidden');
+      }
+    }
+
+    function renderStats(data) {
+      const bar = $('#stats-bar');
+      bar.innerHTML = `
+        <div class="stat"><span class="stat-value">${data.cluster_count}</span><span class="stat-label">Clusters</span></div>
+        <div class="stat"><span class="stat-value">${data.vm_count}</span><span class="stat-label">VMs</span></div>
+        <div class="stat"><span class="stat-value">${data.host_count}</span><span class="stat-label">Hosts</span></div>
+        <div class="stat"><span class="stat-value">${data.sheets.length}</span><span class="stat-label">Sheets</span></div>
+      `;
+    }
+
+    function renderClusters(filter = '') {
+      const grid = $('#cluster-grid');
+      const q = filter.toLowerCase();
+      const items = state.clusters.filter((c) =>
+        c.name.toLowerCase().includes(q) || (c.datacenter || '').toLowerCase().includes(q)
+      );
+
+      grid.innerHTML = items.map((c) => `
+        <label class="cluster-card ${state.selectedClusters.has(c.name) ? 'selected' : ''}">
+          <input type="checkbox" value="${esc(c.name)}" ${state.selectedClusters.has(c.name) ? 'checked' : ''}>
+          <div class="cluster-info">
+            <span class="cluster-name">${esc(c.name)}</span>
+            <span class="cluster-meta">${c.datacenter || '—'} · ${c.vm_count} VMs · ${c.host_count} hosts</span>
+          </div>
+        </label>
+      `).join('');
+
+      grid.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) state.selectedClusters.add(cb.value);
+          else state.selectedClusters.delete(cb.value);
+          cb.closest('.cluster-card').classList.toggle('selected', cb.checked);
+          updateSelectionCount();
+        });
+      });
+      updateSelectionCount();
+    }
+
+    function updateSelectionCount() {
+      const n = state.selectedClusters.size;
+      $('#apply-clusters').textContent = n ? `Apply filter (${n})` : 'Apply filter';
+    }
+
+    $('#cluster-search').addEventListener('input', (e) => renderClusters(e.target.value));
+    $('#select-all').addEventListener('click', () => {
+      state.clusters.forEach((c) => state.selectedClusters.add(c.name));
+      renderClusters($('#cluster-search').value);
+    });
+    $('#select-none').addEventListener('click', () => {
+      state.selectedClusters.clear();
+      renderClusters($('#cluster-search').value);
+    });
+
+    $('#apply-clusters').addEventListener('click', async () => {
+      if (!state.selectedClusters.size) {
+        showToast('Please select at least one cluster.', 'error');
+        return;
+      }
+      $('#apply-clusters').disabled = true;
+      try {
+        const res = await fetch(`/api/session/${state.sessionId}/clusters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clusters: [...state.selectedClusters] }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        state.filtered = true;
+        $('#to-edit').disabled = false;
+        showToast(`Filtered: ${data.total_rows} rows in ${Object.keys(data.filtered_stats).length} sheets`, 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        $('#apply-clusters').disabled = false;
+      }
+    });
+
+    $('#back-upload').addEventListener('click', () => {
+      resetSession();
+      setStep(1);
+    });
+    $('#to-edit').addEventListener('click', async () => {
+      if (!state.filtered) {
+        showToast('Please apply the filter first.', 'error');
+        return;
+      }
+      await loadSheets();
+      setStep(3);
+    });
+
+    async function loadSheets() {
+      const res = await fetch(`/api/session/${state.sessionId}/sheets`);
+      const data = await res.json();
+      const sel = $('#sheet-select');
+      sel.innerHTML = data.sheets.map((s) =>
+        `<option value="${esc(s.name)}">${esc(s.name)} (${s.rows} rows)</option>`
+      ).join('');
+      state.currentSheet = data.sheets[0]?.name;
+      state.offset = 0;
+      if (state.currentSheet) await loadSheetData();
+    }
+
+    $('#sheet-select').addEventListener('change', async (e) => {
+      state.currentSheet = e.target.value;
+      state.offset = 0;
+      await loadSheetData();
+    });
+
+    async function loadSheetData() {
+      const res = await fetch(
+        `/api/session/${state.sessionId}/sheet/${encodeURIComponent(state.currentSheet)}?offset=${state.offset}&limit=${state.limit}`
+      );
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error, 'error'); return; }
+
+      state.columns = data.columns;
+      state.rows = data.rows;
+      state.totalRows = data.total;
+      renderTable();
+    }
+
+    function renderTable(filter = '') {
+      const thead = $('#table-head');
+      const tbody = $('#table-body');
+      const q = filter.toLowerCase();
+
+      thead.innerHTML = `<tr>${state.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>`;
+
+      const filteredRows = q
+        ? state.rows.filter((r) => state.columns.some((c) => String(r[c] ?? '').toLowerCase().includes(q)))
+        : state.rows;
+
+      tbody.innerHTML = filteredRows.map((row) => `
+        <tr data-row="${row._row}">
+          ${state.columns.map((col) => `
+            <td contenteditable="true" data-col="${esc(col)}" data-row="${row._row}">${esc(String(row[col] ?? ''))}</td>
+          `).join('')}
+        </tr>
+      `).join('');
+
+      tbody.querySelectorAll('td[contenteditable]').forEach((td) => {
+        td.addEventListener('blur', async () => {
+          const row = Number(td.dataset.row);
+          const col = td.dataset.col;
+          const value = td.textContent;
+          await fetch(`/api/session/${state.sessionId}/edit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sheet: state.currentSheet, row, column: col, value }),
+          });
+          td.classList.add('edited');
+        });
+      });
+
+      const page = Math.floor(state.offset / state.limit) + 1;
+      const totalPages = Math.max(1, Math.ceil(state.totalRows / state.limit));
+      $('#page-info').textContent = `Page ${page} of ${totalPages} (${state.totalRows} rows)`;
+      $('#prev-page').disabled = state.offset <= 0;
+      $('#next-page').disabled = state.offset + state.limit >= state.totalRows;
+    }
+
+    $('#table-search').addEventListener('input', (e) => renderTable(e.target.value));
+    $('#prev-page').addEventListener('click', async () => {
+      state.offset = Math.max(0, state.offset - state.limit);
+      await loadSheetData();
+    });
+    $('#next-page').addEventListener('click', async () => {
+      if (state.offset + state.limit < state.totalRows) {
+        state.offset += state.limit;
+        await loadSheetData();
+      }
+    });
+
+    $('#back-clusters').addEventListener('click', () => setStep(2));
+    $('#to-export').addEventListener('click', () => {
+      const n = state.selectedClusters.size;
+      const names = [...state.selectedClusters].slice(0, 3).join(', ');
+      const more = n > 3 ? ` … (+${n - 3} more)` : '';
+      $('#export-summary').textContent = `${n} clusters exported: ${names}${more}`;
+      $('#download-btn').href = `/api/session/${state.sessionId}/export`;
+      setStep(4);
+    });
+
+    $('#to-analytics').addEventListener('click', async () => {
+      await loadVmAnalytics();
+      setStep(5);
+    });
+
+    $('#to-customer').addEventListener('click', async () => {
+      await loadCustomerSummary();
+      setStep(6);
+    });
+
+    $('#back-export-from-analytics').addEventListener('click', () => setStep(4));
+    $('#analytics-to-customer').addEventListener('click', async () => {
+      await loadCustomerSummary();
+      setStep(6);
+    });
+    $('#back-analytics').addEventListener('click', () => setStep(5));
+
+    $$('.form-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        $$('.form-tab').forEach((t) => t.classList.toggle('active', t === tab));
+        $$('.form-tab-panel').forEach((panel) => {
+          panel.classList.toggle('active', panel.id === `tab-${tab.dataset.tab}`);
+        });
+      });
+    });
+
+    async function loadVmAnalytics() {
+      try {
+        const res = await fetch(`/api/session/${state.sessionId}/vm-analytics`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        state.analytics = data;
+        const scope = data.filtered
+          ? `${data.selected_clusters.length} selected clusters`
+          : 'entire environment';
+        $('#analytics-meta').textContent = `Data source: ${scope}`;
+
+        $('#analytics-stats').innerHTML = `
+          <div class="stat"><span class="stat-value">${data.total_vms}</span><span class="stat-label">Total VMs</span></div>
+          <div class="stat"><span class="stat-value">${data.powered_on_count}</span><span class="stat-label">Powered on</span></div>
+          <div class="stat"><span class="stat-value">${data.os_summary.length}</span><span class="stat-label">Operating systems</span></div>
+          <div class="stat"><span class="stat-value">${data.application_count}</span><span class="stat-label">Applications</span></div>
+        `;
+
+        renderOsAnalytics(data);
+        renderAppAnalytics(data, $('#app-search').value);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    function renderOsAnalytics(data) {
+      const total = data.powered_on_count || 1;
+      const familyColors = { Windows: '#3b82f6', Linux: '#22c55e', Other: '#f59e0b', Unknown: '#8b9cb3' };
+
+      $('#os-family-bar').innerHTML = data.os_families.map((item) => {
+        const pct = Math.round((item.count / total) * 100);
+        const color = familyColors[item.family] || '#6366f1';
+        return `
+          <div class="family-segment" style="width:${pct}%;background:${color}" title="${esc(item.family)}: ${item.count}">
+            ${pct >= 8 ? esc(item.family) : ''}
+          </div>`;
+      }).join('');
+
+      $('#os-table-body').innerHTML = data.os_summary.map((item) => {
+        const pct = Math.round((item.count / total) * 100);
+        return `<tr>
+          <td>${esc(item.os)}</td>
+          <td>${item.count}</td>
+          <td><span class="pct-bar"><span style="width:${pct}%"></span></span> ${pct}%</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderAppAnalytics(data, filter = '') {
+      const q = filter.toLowerCase();
+      const names = data.application_names.filter((n) => n.toLowerCase().includes(q));
+      const apps = data.applications.filter((a) =>
+        a.name.toLowerCase().includes(q) ||
+        a.os.toLowerCase().includes(q) ||
+        a.cluster.toLowerCase().includes(q)
+      );
+
+      $('#app-name-list').innerHTML = names.length
+        ? names.map((n) => `<li>${esc(n)}</li>`).join('')
+        : '<li class="muted">No matches</li>';
+
+      const more = $('#app-names-more');
+      if (data.application_names_truncated && !filter) {
+        const remaining = data.application_count - data.application_names.length;
+        more.textContent = `… and ${remaining} more applications`;
+        more.classList.remove('hidden');
+      } else {
+        more.classList.add('hidden');
+      }
+
+      $('#vm-detail-body').innerHTML = apps.slice(0, 200).map((a) => `
+        <tr>
+          <td>${esc(a.name)}</td>
+          <td>${esc(a.os)}</td>
+          <td>${esc(a.cluster || '—')}</td>
+          <td>${esc(a.host || '—')}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="4" class="muted">No matches</td></tr>';
+    }
+
+    $('#app-search').addEventListener('input', (e) => {
+      if (state.analytics) renderAppAnalytics(state.analytics, e.target.value);
+    });
+
+    async function loadCustomerSummary() {
+      try {
+        const res = await fetch(`/api/session/${state.sessionId}/customer-summary`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        const scope = data.filtered
+          ? `${data.selected_clusters.length} selected clusters`
+          : 'entire environment';
+        $('#customer-meta').textContent = `Data source: ${scope}`;
+
+        $('#preview-stats').innerHTML = `
+          <div class="stat"><span class="stat-value">${data.cluster_count}</span><span class="stat-label">Clusters</span></div>
+          <div class="stat"><span class="stat-value">${data.node_count}</span><span class="stat-label">Nodes</span></div>
+          <div class="stat"><span class="stat-value">${data.node_cores?.total_cores ?? 0}</span><span class="stat-label">Total cores</span></div>
+          <div class="stat"><span class="stat-value">${data.application_count}</span><span class="stat-label">VMs powered on</span></div>
+        `;
+
+        const cores = data.node_cores || {};
+        $('#preview-cores-summary').textContent = cores.summary || '—';
+
+        const nodesBody = $('#preview-nodes-body');
+        const previewNodes = (cores.nodes || []).slice(0, 15);
+        nodesBody.innerHTML = previewNodes.length
+          ? previewNodes.map((n) => `
+            <tr>
+              <td title="${esc(n.host)}">${esc(n.host)}</td>
+              <td>${esc(n.cluster || '—')}</td>
+              <td>${n.cores}</td>
+            </tr>`).join('')
+          : '<tr><td colspan="3" class="muted">No node data</td></tr>';
+
+        const nodesMore = $('#preview-nodes-more');
+        if ((cores.nodes || []).length > 15) {
+          nodesMore.textContent = `… and ${cores.nodes.length - 15} more nodes (full list in Word document)`;
+          nodesMore.classList.remove('hidden');
+        } else {
+          nodesMore.classList.add('hidden');
         }
 
-        pickDir.addEventListener("click", async () => {
-          if (!window.showDirectoryPicker) {
-            setStatus(
-              "This browser does not support folder pickers. Use a normal download or try Chromium.",
-              "warn"
-            );
-            return;
-          }
-          try {
-            dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-            dirLabel.textContent = "Folder selected (writable)";
-            setStatus("", "");
-          } catch (e) {
-            if (e && e.name === "AbortError") return;
-            setStatus("Could not open folder: " + (e && e.message ? e.message : e), "err");
-          }
+        $('#preview-storage').textContent = data.storage.summary;
+
+        const osList = $('#preview-os');
+        osList.innerHTML = data.os_summary?.length
+          ? data.os_summary.slice(0, 8).map((o) => `<li>${esc(o.os)} — ${o.count} VMs</li>`).join('')
+          : '<li class="muted">No OS data</li>';
+
+        const appsList = $('#preview-apps');
+        appsList.innerHTML = data.applications.length
+          ? data.applications.map((a) => `<li>${esc(a)}</li>`).join('')
+          : '<li class="muted">No powered-on VMs</li>';
+
+        const more = $('#preview-apps-more');
+        if (data.applications_truncated) {
+          const remaining = data.application_count - data.applications.length;
+          more.textContent = `… and ${remaining} more`;
+          more.classList.remove('hidden');
+        } else {
+          more.classList.add('hidden');
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    $('#customer-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const customerName = $('#customer-name').value.trim();
+      const address = $('#customer-address').value.trim();
+      const contactPerson = $('#contact-person').value.trim();
+      const additionalInfo = $('#additional-info').value.trim();
+      const softwareInfo = $('#software-info').value.trim();
+      if (!customerName || !address) {
+        showToast('Please enter customer name and address.', 'error');
+        return;
+      }
+
+      const btn = $('#export-doc-btn');
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/session/${state.sessionId}/customer-doc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customer_name: customerName,
+            address,
+            contact_person: contactPerson,
+            additional_info: additionalInfo,
+            software_info: softwareInfo,
+          }),
         });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || 'Export failed');
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        const filename = match ? match[1] : 'Customer_Description.docx';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Word document created', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
-        form.addEventListener("submit", async (ev) => {
-          ev.preventDefault();
-          const size = (form.querySelector('input[name="size"]:checked') || {}).value || "m";
-          let filename = (filenameInput.value || "rvtools_synthetic.xlsx").trim();
-          if (!filename.toLowerCase().endsWith(".xlsx")) filename += ".xlsx";
+    $('#new-session').addEventListener('click', () => {
+      resetSession();
+      setStep(1);
+    });
 
-          const serverPath = (serverDir.value || "").trim();
-          submitBtn.disabled = true;
-          setStatus("Generating…", "info");
+    function resetSession() {
+      state.sessionId = null;
+      state.clusters = [];
+      state.selectedClusters.clear();
+      state.filtered = false;
+      state.analytics = null;
+      fileInput.value = '';
+      uploadZone.classList.remove('hidden');
+      $('#cluster-grid').innerHTML = '';
+      $('#to-edit').disabled = true;
+      $('#customer-name').value = '';
+      $('#customer-address').value = '';
+      $('#contact-person').value = '';
+      $('#additional-info').value = '';
+      $('#software-info').value = '';
+      $$('.form-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+      $$('.form-tab-panel').forEach((p, i) => p.classList.toggle('active', i === 0));
+    }
 
-          try {
-            if (serverPath) {
-              const res = await fetch("/api/generate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ size, filename, export_dir: serverPath }),
-              });
-              const data = await res.json().catch(() => ({}));
-              if (!res.ok) throw new Error(data.error || res.statusText);
-              setStatus("Saved to: " + (data.written_path || ""), "ok");
-              return;
-            }
-
-            const res = await fetch("/api/generate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ size, filename }),
-            });
-
-            if (!res.ok) {
-              const data = await res.json().catch(() => ({}));
-              throw new Error(data.error || res.statusText);
-            }
-
-            const blob = await res.blob();
-
-            if (dirHandle && dirHandle.getFileHandle) {
-              const fh = await dirHandle.getFileHandle(filename, { create: true });
-              const w = await fh.createWritable();
-              await w.write(blob);
-              await w.close();
-              setStatus("Saved in the selected folder: " + filename, "ok");
-            } else {
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = filename;
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-              URL.revokeObjectURL(url);
-              setStatus("Download started.", "ok");
-            }
-          } catch (e) {
-            setStatus(e.message || String(e), "err");
-          } finally {
-            submitBtn.disabled = false;
-          }
-        });
-      })();
-    </script>
-  </body>
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+  </script>
+</body>
 </html>
